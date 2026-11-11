@@ -4,15 +4,22 @@
  * onde Y = 100 - X. Os elementos originais ficam transparentes (opacity:0) e uma camada própria,
  * em Shadow DOM fixo no <body>, é desenhada exatamente sobre eles.
  *
- * Desempenho:
- *  - Sem nenhum <progress> na página (ex.: conversas), só roda um querySelector a cada 1 s.
- *  - O DOM não é varrido: a busca parte dos <progress> (poucos) e olha só o cartão ao redor.
- *  - Sem loop contínuo: repinta só em scroll/resize e na varredura lenta (1 rAF por evento).
- *  - Estilos computados são cacheados e só relidos na varredura lenta (250 ms).
+ * Ciclo de vida:
+ *  - O background.js só injeta este script quando a aba entra em /settings/usage
+ *    (nas conversas e demais páginas a extensão não existe na aba).
+ *  - Ao sair da página (navegação SPA, sem reload), tudo é desmontado: overlay, timers e observers.
+ *    A troca de URL é detectada pela Navigation API, popstate e por clique.
+ *
+ * Desempenho (só enquanto está na página de uso e a aba está visível):
+ *  - Sem loop contínuo: repinta só em scroll/resize/mudança de layout (1 rAF por evento).
+ *  - Varredura (estilos + valores) a cada 5 s com foco e 30 s sem foco; aba oculta não roda nada.
+ *  - Mudança no texto do valor (MutationObserver) atualiza na hora, sem esperar a varredura.
  */
 (() => {
-  if (window.__codexUsageFix) return;
-  window.__codexUsageFix = true;
+  // Reinjeção (o usuário voltou à página de uso): só reavalia a URL.
+  if (window.__codexUsageFix) { window.__codexUsageFix.check(); return; }
+
+  const isUsagePage = () => location.pathname.replace(/\/+$/, '') === '/settings/usage';
 
   const REMAINING_RE =
     /^\s*(\d+(?:[.,]\d+)?)\s*%\s*(restante|restantes|remaining|left|restant|verbleibend)/i;
@@ -23,7 +30,6 @@
   const HIDE_ATTR = 'data-cuf-hidden';
   const style = document.createElement('style');
   style.textContent = `[${HIDE_ATTR}]{opacity:0 !important}`;
-  document.documentElement.appendChild(style);
 
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483000;';
@@ -35,7 +41,6 @@
   </style>`;
 
   const items = new Map(); // <progress> -> item
-  let hostAttached = false;
   let rafId = 0;
 
   // Arredonda para 1 casa antes de decidir o formato: 44.0000001 -> "44", 44.25 -> "44,3".
@@ -68,12 +73,16 @@
     root.append(bar, label);
     textEl.setAttribute(HIDE_ATTR, '');
     prog.setAttribute(HIDE_ATTR, '');
-    const it = { prog, textEl, label, bar, fill, cs: null, last: {} };
+    // Valor novo no texto => atualiza no próximo frame, sem esperar a varredura periódica.
+    const mo = new MutationObserver(requestScan);
+    mo.observe(textEl, { characterData: true, childList: true, subtree: true });
+    const it = { prog, textEl, label, bar, fill, mo, cs: null, last: {} };
     items.set(prog, it);
     return it;
   }
 
   function removeItem(it) {
+    it.mo.disconnect();
     it.label.remove();
     it.bar.remove();
     it.textEl.removeAttribute(HIDE_ATTR);
@@ -81,7 +90,7 @@
     items.delete(it.prog);
   }
 
-  // Varredura lenta: descobre/limpa itens e atualiza estilos cacheados.
+  // Varredura: descobre/limpa itens e atualiza estilos e valores cacheados.
   function scan() {
     const progs = document.querySelectorAll('progress');
     const live = new Set();
@@ -123,6 +132,7 @@
     const reads = [];
     for (const it of items.values()) {
       if (!it.cs) continue;
+      if (!it.prog.isConnected || !it.textEl.isConnected) { needScan = true; continue; }
       const tr = it.textEl.getBoundingClientRect();
       const pr = it.prog.getBoundingClientRect();
       let visible = false;
@@ -167,47 +177,97 @@
       setIf(it, 'fw2', fill, 'width', used + '%');
       setIf(it, 'fb', fill, 'background', usageColor(used, cs.base));
     }
+    if (needScan) requestPaint();
   }
 
-  // Só trabalha com a aba visível. NÃO depende do foco da janela: no Windows dá para rolar
-  // uma janela sem foco, e a página pode atualizar os valores enquanto outra janela está ativa.
-  const active = () => !document.hidden;
+  // ---------- Agendamento (só enquanto running) ----------
+  const SCAN_FOCUSED = 5000;     // barras encontradas, janela em foco
+  const SCAN_UNFOCUSED = 30000;  // visível, mas sem foco (ex.: monitor secundário)
+  const SCAN_LOADING = 1000;     // na página de uso, mas as barras ainda não carregaram
+  let running = false;
   let timerId = 0;
+  let needScan = false;
+  let resizeObs = null;
 
-  // Pintura sob demanda: no máximo 1 por frame, disparada por scroll/resize/varredura.
+  const active = () => running && !document.hidden;
+
   function frame() {
     rafId = 0;
-    if (items.size && active()) paint();
+    if (!active()) return;
+    if (needScan) { needScan = false; scan(); }
+    if (items.size) paint();
   }
   function requestPaint() {
-    if (!rafId && items.size) rafId = requestAnimationFrame(frame);
+    if (!rafId && items.size && active()) rafId = requestAnimationFrame(frame);
+  }
+  function requestScan() {
+    needScan = true;
+    requestPaint();
   }
 
-  function tick() {
-    if (document.querySelector('progress') || items.size) {
-      if (!hostAttached && document.body) {
-        document.body.appendChild(host);
-        hostAttached = true;
-      }
-      scan();
-      requestPaint();
-    }
-  }
-
-  // Ocioso: 1 querySelector/s. Ativo (há barras): varredura a cada 250 ms.
-  // Aba oculta: nenhum timer fica agendado. Ao voltar, atualiza na hora.
   function schedule() {
+    clearTimeout(timerId);
     timerId = 0;
     if (!active()) return;
-    tick();
-    timerId = setTimeout(schedule, items.size ? 250 : 1000);
+    scan();
+    requestPaint();
+    const delay = !items.size ? SCAN_LOADING : document.hasFocus() ? SCAN_FOCUSED : SCAN_UNFOCUSED;
+    timerId = setTimeout(schedule, delay);
   }
-  function wake() {
-    if (!timerId && active()) schedule();
+
+  function start() {
+    if (running) return;
+    if (!document.body) { document.addEventListener('DOMContentLoaded', check, { once: true }); return; }
+    running = true;
+    document.documentElement.appendChild(style);
+    document.body.appendChild(host);
+    document.addEventListener('visibilitychange', schedule);
+    window.addEventListener('focus', schedule);
+    // capture: pega também o scroll de containers internos (o painel de configurações rola por dentro).
+    window.addEventListener('scroll', requestPaint, { capture: true, passive: true });
+    window.addEventListener('resize', requestPaint, { passive: true });
+    // Mudanças de layout que não são scroll/resize (conteúdo carregando, seções abrindo).
+    resizeObs = new ResizeObserver(requestPaint);
+    resizeObs.observe(document.documentElement);
+    schedule();
   }
-  document.addEventListener('visibilitychange', wake);
-  // capture: pega também o scroll de containers internos (o painel de configurações rola por dentro).
-  window.addEventListener('scroll', requestPaint, { capture: true, passive: true });
-  window.addEventListener('resize', requestPaint, { passive: true });
-  schedule();
+
+  function stop() {
+    if (!running) return;
+    running = false;
+    clearTimeout(timerId);
+    timerId = 0;
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+    needScan = false;
+    for (const it of [...items.values()]) removeItem(it);
+    document.removeEventListener('visibilitychange', schedule);
+    window.removeEventListener('focus', schedule);
+    window.removeEventListener('scroll', requestPaint, { capture: true });
+    window.removeEventListener('resize', requestPaint);
+    resizeObs.disconnect();
+    resizeObs = null;
+    host.remove();
+    style.remove();
+  }
+
+  const check = () => (isUsagePage() ? start() : stop());
+
+  // Detecção de troca de URL em SPA (sem reload). Os três são baratos e só reagem a eventos.
+  let lastHref = location.href;
+  const onMaybeNavigate = () => {
+    if (location.href === lastHref) return;
+    lastHref = location.href;
+    check();
+  };
+  if (window.navigation) window.navigation.addEventListener('currententrychange', onMaybeNavigate);
+  window.addEventListener('popstate', onMaybeNavigate);
+  // Clique: o roteador troca a URL logo depois do clique, então verifica no frame seguinte e após 300 ms.
+  document.addEventListener('click', () => {
+    requestAnimationFrame(onMaybeNavigate);
+    setTimeout(onMaybeNavigate, 300);
+  }, { capture: true, passive: true });
+
+  window.__codexUsageFix = { check };
+  check();
 })();
