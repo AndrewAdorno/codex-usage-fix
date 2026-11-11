@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Usage Fix",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Mostra a porcentagem de USO (e não a restante) nos limites do Codex em chatgpt.com/settings/usage.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -9,15 +9,34 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["scripting"],
-  "host_permissions": ["https://chatgpt.com/*"],
+  "action": {
+    "default_title": "Codex Usage Fix",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "permissions": [
+    "scripting",
+    "storage",
+    "favicon"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/settings/usage*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://chatgpt.com/settings/usage*"
+      ],
+      "js": [
+        "shared.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

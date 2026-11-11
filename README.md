@@ -21,6 +21,19 @@ raciocínio a cada vez que se olha. Essa extensão padroniza a exibição: **28%
   uma camada em Shadow DOM, fixa no `<body>`, é desenhada exatamente por cima.
 - Lê o valor do `<progress>` original a cada frame: atualização em tempo real.
 - A barra passa a encher conforme o uso; fica âmbar a partir de 70% e vermelha a partir de 90%.
+- A aba também mostra o uso da janela de 5 horas: título `13% · ↻ em 3h 19min — Uso do Codex`
+  (números primeiro, para continuarem visíveis com muitas abas abertas) e favicon com o número e
+  uma barra. Ao sair da página, título e favicon originais voltam.
+- Clicando no ícone da extensão:
+  - **Favicon**: 5 horas, semanal, 5 horas e semanal (duas barras) ou o original do ChatGPT.
+  - **Título**: sugestões que combinam com o favicon escolhido, ou um personalizado com
+    `{5h}`, `{sem}`, `{reset5h}`, `{resetsem}` (quanto falta para reiniciar), `{codex}` e `{pagina}`.
+  - **Valores na aba**: usado (padrão) ou restante.
+
+  A mudança vale na hora, sem recarregar a aba.
+
+  <img src="assets/popup.png" width="320" alt="Popup da extensão: prévia da aba, favicon (5 horas, semanal, ambas, original), título e valores na aba">
+
 - Para voltar ao comportamento original, desative a extensão.
 
 ## Observação

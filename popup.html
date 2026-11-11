@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Codex Usage Fix</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff; --fg: #111827; --muted: #6b7280; --line: #d1d5db;
+      --field: #f9fafb; --accent: #10a37f; --tab: #dee1e6; --tab-fg: #1f1f1f; --strip: #f1f3f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1f2023; --fg: #ececf1; --muted: #9ca3af; --line: #3f4147;
+        --field: #2a2c30; --accent: #19c37d; --tab: #35363a; --tab-fg: #e8eaed; --strip: #202124;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; width: 320px; background: var(--bg); color: var(--fg);
+      font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    /* Prévia: imitação da barra de abas, larga e estreita. */
+    .strip { display: flex; gap: 6px; align-items: flex-end; padding: 10px 12px 0; background: var(--strip); }
+    .tab {
+      display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; min-width: 0;
+      background: var(--tab); color: var(--tab-fg); border-radius: 8px 8px 0 0; font-size: 12px; white-space: nowrap;
+    }
+    .tab img { width: 16px; height: 16px; flex: none; }
+    .tab span { overflow: hidden; text-overflow: ellipsis; }
+    .tab.wide { flex: 1; }
+    .tab.narrow { width: 92px; flex: none; }
+
+    main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field > span { font-size: 12px; font-weight: 600; }
+    select, input[type=text] {
+      width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
+      background: var(--field); color: var(--fg); font: inherit;
+    }
+    select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+    input[type=text] { font: 12px ui-monospace, Consolas, monospace; }
+
+    /* Favicon: opções lado a lado, cada uma com o ícone no tamanho real da aba. */
+    .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .seg label {
+      display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 7px 2px 6px;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--field); cursor: pointer; font-size: 11px;
+    }
+    .seg label:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .seg img { width: 16px; height: 16px; }
+    /* Fallback se o Chrome ainda não tiver o favicon do ChatGPT em cache. */
+    img.missing { box-sizing: border-box; border: 1.5px dashed var(--muted); border-radius: 50%; }
+
+    .custom { display: flex; flex-direction: column; gap: 6px; }
+    .custom[hidden] { display: none; }
+    .tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+    .tokens button {
+      border: 1px solid var(--line); background: var(--field); color: var(--fg); border-radius: 999px;
+      padding: 1px 8px; font: 11px ui-monospace, Consolas, monospace; cursor: pointer;
+    }
+    .hint { color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="strip" aria-hidden="true">
+    <div class="tab wide"><img id="pv-icon" alt=""><span id="pv-title"></span></div>
+    <div class="tab narrow"><img id="pv-icon2" alt=""><span id="pv-title2"></span></div>
+  </div>
+
+  <main>
+    <div class="field">
+      <span id="favicon-label">Favicon</span>
+      <div class="seg" id="favicon" role="radiogroup" aria-labelledby="favicon-label">
+        <label><input type="radio" name="favicon" value="5h"><img alt="">5 horas</label>
+        <label><input type="radio" name="favicon" value="sem"><img alt="">Semanal</label>
+        <label><input type="radio" name="favicon" value="both"><img alt="">Ambas</label>
+        <label><input type="radio" name="favicon" value="off"><img alt="" id="original-icon">Original</label>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Título</span>
+      <select id="title"></select>
+    </label>
+
+    <div class="custom" id="custom" hidden>
+      <input type="text" id="template" spellcheck="false" aria-label="Título personalizado">
+      <div class="tokens" id="tokens"></div>
+      <div class="hint">Clique num campo para inserir no cursor.</div>
+    </div>
+
+    <label class="field">
+      <span>Valores na aba</span>
+      <select id="value">
+        <option value="used">Usado</option>
+        <option value="remaining">Restante</option>
+      </select>
+    </label>
+
+    <div class="hint" id="hint"></div>
+  </main>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

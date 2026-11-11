@@ -13,6 +13,6 @@ const isUsageUrl = (url) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo.url || !isUsageUrl(changeInfo.url)) return;
   chrome.scripting
-    .executeScript({ target: { tabId }, files: ['content.js'] })
+    .executeScript({ target: { tabId }, files: ['shared.js', 'content.js'] })
     .catch(() => {}); // aba fechada / navegou de novo no meio: ignora
 });
