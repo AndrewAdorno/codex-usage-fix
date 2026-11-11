@@ -7,7 +7,7 @@
  * Desempenho:
  *  - Sem nenhum <progress> na página (ex.: conversas), só roda um querySelector a cada 1 s.
  *  - O DOM não é varrido: a busca parte dos <progress> (poucos) e olha só o cartão ao redor.
- *  - O loop de pintura (rAF) só existe enquanto há barras para acompanhar.
+ *  - Sem loop contínuo: repinta só em scroll/resize e na varredura lenta (1 rAF por evento).
  *  - Estilos computados são cacheados e só relidos na varredura lenta (250 ms).
  */
 (() => {
@@ -38,7 +38,11 @@
   let hostAttached = false;
   let rafId = 0;
 
-  const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ','));
+  // Arredonda para 1 casa antes de decidir o formato: 44.0000001 -> "44", 44.25 -> "44,3".
+  const fmt = (n) => {
+    const r = Math.round(n * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1).replace('.', ',');
+  };
   const transparent = (c) => !c || c === 'rgba(0, 0, 0, 0)' || c === 'transparent';
 
   const usageColor = (used, base) => (used >= 90 ? '#ef4444' : used >= 70 ? '#f59e0b' : base);
@@ -105,7 +109,7 @@
         base: transparent(base) ? '#888' : base,
       };
       const m = REMAINING_RE.exec(it.textEl.textContent);
-      it.textRemaining = m ? parseFloat(m[1].replace(',', '.')) : 0;
+      it.textRemaining = m ? parseFloat(m[1].replace(',', '.')) : NaN;
     }
     for (const it of [...items.values()]) if (!live.has(it.prog)) removeItem(it);
   }
@@ -138,8 +142,10 @@
       setIf(it, 'db', bar, 'display', disp);
       if (!visible) continue;
 
+      // O texto da página é a fonte da verdade (já vem arredondado como o site exibe);
+      // o <progress> só é usado se o texto não puder ser lido.
       const max = it.prog.max || 100;
-      const rem = isNaN(it.prog.value) ? it.textRemaining : (it.prog.value / max) * 100;
+      const rem = !isNaN(it.textRemaining) ? it.textRemaining : (it.prog.value / max) * 100;
       const used = Math.min(100, Math.max(0, 100 - rem));
       const text = `${fmt(used)}% ${usedWord()}`;
       if (it.last.text !== text) { it.last.text = text; label.textContent = text; }
@@ -163,31 +169,33 @@
     }
   }
 
-  // Só trabalha com a aba visível E a janela em foco.
-  const active = () => !document.hidden && document.hasFocus();
+  // Só trabalha com a aba visível. NÃO depende do foco da janela: no Windows dá para rolar
+  // uma janela sem foco, e a página pode atualizar os valores enquanto outra janela está ativa.
+  const active = () => !document.hidden;
   let timerId = 0;
 
+  // Pintura sob demanda: no máximo 1 por frame, disparada por scroll/resize/varredura.
   function frame() {
     rafId = 0;
-    if (!items.size || !active()) return;
-    paint();
-    rafId = requestAnimationFrame(frame);
+    if (items.size && active()) paint();
+  }
+  function requestPaint() {
+    if (!rafId && items.size) rafId = requestAnimationFrame(frame);
   }
 
   function tick() {
-    if (!active()) return;
     if (document.querySelector('progress') || items.size) {
       if (!hostAttached && document.body) {
         document.body.appendChild(host);
         hostAttached = true;
       }
       scan();
-      if (items.size && !rafId) rafId = requestAnimationFrame(frame);
+      requestPaint();
     }
   }
 
   // Ocioso: 1 querySelector/s. Ativo (há barras): varredura a cada 250 ms.
-  // Sem foco: nenhum timer nem rAF fica agendado. Ao voltar o foco, atualiza na hora.
+  // Aba oculta: nenhum timer fica agendado. Ao voltar, atualiza na hora.
   function schedule() {
     timerId = 0;
     if (!active()) return;
@@ -197,7 +205,9 @@
   function wake() {
     if (!timerId && active()) schedule();
   }
-  window.addEventListener('focus', wake);
   document.addEventListener('visibilitychange', wake);
+  // capture: pega também o scroll de containers internos (o painel de configurações rola por dentro).
+  window.addEventListener('scroll', requestPaint, { capture: true, passive: true });
+  window.addEventListener('resize', requestPaint, { passive: true });
   schedule();
 })();
